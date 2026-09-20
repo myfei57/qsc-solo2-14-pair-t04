@@ -113,6 +113,33 @@ class ReadingQuality(str, Enum):
     REJECTED = "rejected"
 
 
+class BoilerState(str, Enum):
+    """蒸汽锅炉状态机。"""
+
+    STANDBY = "standby"
+    STARTING = "starting"
+    PURGING = "purging"
+    FIRING = "firing"
+    STOPPING = "stopping"
+    LOCKED_OUT = "locked_out"
+
+
+class SafetyCaseStatus(str, Enum):
+    """安全处置事件生命周期。"""
+
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESET = "reset"
+
+
+class SteamUserState(str, Enum):
+    """用汽单元需求状态。"""
+
+    IDLE = "idle"
+    DEMAND = "demand"
+    PEAK = "peak"
+
+
 class DocMixin:
     """把数据类转换为可持久化文档。"""
 
@@ -396,3 +423,86 @@ class Batch(DocMixin):
     created_at: str = ""
     updated_at: str = ""
     completed_at: str | None = None
+
+
+@dataclass
+class SteamBoiler(DocMixin):
+    """一台蒸汽锅炉的运行与联锁状态。"""
+
+    id: str
+    code: str
+    brewery_id: str
+    header_id: str
+    state: str = BoilerState.STANDBY.value
+    role: str = "none"
+    firing_rate_pct: float = 0.0
+    pressure_bar: float | None = None
+    water_level_pct: float | None = None
+    flame_on: bool = False
+    feed_pump_on: bool = False
+    header_valve_open: bool = False
+    runtime_min: float = 0.0
+    cycles: int = 0
+    light_off_at: str | None = None
+    firing_since: str | None = None
+    purge_due_at: str | None = None
+    last_started_at: str | None = None
+    last_stopped_at: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class SteamHeader(DocMixin):
+    """蒸汽母管：多台锅炉并列向其供汽。"""
+
+    id: str
+    code: str
+    brewery_id: str
+    pressure_bar: float | None = None
+    pressure_drop_bar_min: float = 0.0
+    lead_boiler_id: str | None = None
+    lag_boiler_ids: list[str] = field(default_factory=list)
+    low_pressure_since: str | None = None
+    high_pressure_since: str | None = None
+    last_reading_at: str | None = None
+    previous_reading_at: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class SteamUser(DocMixin):
+    """用汽单元（如糖化、煮沸）的申报需求。"""
+
+    id: str
+    code: str
+    brewery_id: str
+    header_id: str
+    state: str = SteamUserState.IDLE.value
+    load_pct: float = 0.0
+    batch_id: str | None = None
+    demanded_at: str | None = None
+    released_at: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class SteamSafetyCase(DocMixin):
+    """一次安全越线处置的完整事件序列（SOE）。"""
+
+    id: str
+    brewery_id: str
+    boiler_id: str
+    code: str
+    severity: str
+    reason: str
+    status: str = SafetyCaseStatus.ACTIVE.value
+    latching: bool = True
+    readings: dict[str, Any] = field(default_factory=dict)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    raised_at: str = ""
+    acknowledged_at: str | None = None
+    acknowledged_by: str | None = None
+    reset_at: str | None = None
+    reset_by: str | None = None
+    reset_note: str | None = None
+    updated_at: str = ""

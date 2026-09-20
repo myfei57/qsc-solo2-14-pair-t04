@@ -68,6 +68,20 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/alarms"),
     ("POST", "/api/alarms/{alarm_id}/ack"),
     ("POST", "/api/alarms/{alarm_id}/resolve"),
+    ("GET", "/api/steam/headers/{header_id}"),
+    ("POST", "/api/steam/headers/{header_id}/pressure"),
+    ("POST", "/api/steam/headers/{header_id}/dispatch"),
+    ("POST", "/api/steam/boilers/{boiler_id}/readings"),
+    ("GET", "/api/steam/boilers/{boiler_id}"),
+    ("POST", "/api/steam/boilers/{boiler_id}/start"),
+    ("POST", "/api/steam/boilers/{boiler_id}/shutdown"),
+    ("POST", "/api/steam/boilers/{boiler_id}/trip"),
+    ("GET", "/api/steam/boilers/{boiler_id}/purge"),
+    ("POST", "/api/steam/users/{user_id}/demand"),
+    ("GET", "/api/steam/cases"),
+    ("GET", "/api/steam/cases/{case_id}"),
+    ("POST", "/api/steam/cases/{case_id}/ack"),
+    ("POST", "/api/steam/cases/{case_id}/reset"),
     ("GET", "/api/audit"),
 )
 
@@ -521,6 +535,115 @@ class ApiRouter:
             params["alarm_id"], body.get("operator"), body.get("note")
         )
         return {"alarm": serializers.alarm_view(alarm)}
+
+    def _handle_GET_api_steam_headers_header_id(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.header_snapshot(params["header_id"])
+
+    def _handle_POST_api_steam_headers_header_id_pressure(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.report_header_pressure(
+            params["header_id"], body.get("pressure_bar"), body.get("actor", "scada")
+        )
+        return {"header": document}
+
+    def _handle_POST_api_steam_headers_header_id_dispatch(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.dispatch(params["header_id"], body.get("actor", "scheduler"))
+
+    def _handle_POST_api_steam_boilers_boiler_id_readings(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.report_boiler(
+            params["boiler_id"],
+            body.get("pressure_bar"),
+            body.get("water_level_pct"),
+            bool(body.get("flame_on", False)),
+            body.get("actor", "scada"),
+        )
+        view: dict[str, Any] = {"boiler": document}
+        case = self.registry.steam_service.plant.active_case(params["boiler_id"])
+        if case:
+            view["safety_case"] = case
+        return view
+
+    def _handle_GET_api_steam_boilers_boiler_id(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        boiler = self.registry.steam_service.plant.get_boiler(params["boiler_id"])
+        return {"boiler": boiler, "active_case": self.registry.steam_service.plant.active_case(params["boiler_id"])}
+
+    def _handle_POST_api_steam_boilers_boiler_id_start(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.start_boiler(params["boiler_id"], body.get("operator", "operator"))
+        return {"boiler": document}
+
+    def _handle_POST_api_steam_boilers_boiler_id_shutdown(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.shutdown_boiler(params["boiler_id"], body.get("operator", "operator"))
+        return {"boiler": document}
+
+    def _handle_POST_api_steam_boilers_boiler_id_trip(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        case = self.registry.steam_service.manual_trip(
+            params["boiler_id"],
+            body.get("operator", "operator"),
+            reason_code=str(body.get("reason_code", "low_low_water")),
+            note=str(body.get("note", "")),
+        )
+        return {"safety_case": case}
+
+    def _handle_GET_api_steam_boilers_boiler_id_purge(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.purge_status(params["boiler_id"])
+
+    def _handle_POST_api_steam_users_user_id_demand(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.set_demand(
+            params["user_id"],
+            body.get("state"),
+            body.get("load_pct"),
+            body.get("batch_id"),
+            body.get("actor", "brewing"),
+        )
+        return {"user": document}
+
+    def _handle_GET_api_steam_cases(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        boiler_id = _first(query, "boiler_id")
+        status = _first(query, "status")
+        cases = self.registry.steam_service.list_cases(boiler_id=boiler_id, status=status)
+        return {"cases": cases, "count": len(cases)}
+
+    def _handle_GET_api_steam_cases_case_id(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"safety_case": self.registry.steam_service.case_detail(params["case_id"])}
+
+    def _handle_POST_api_steam_cases_case_id_ack(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.acknowledge_case(
+            params["case_id"], body.get("operator", "operator")
+        )
+        return {"safety_case": document}
+
+    def _handle_POST_api_steam_cases_case_id_reset(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        document = self.registry.steam_service.reset_case(
+            params["case_id"], body.get("operator"), body.get("note")
+        )
+        return {"safety_case": document}
 
     def _handle_GET_api_audit(
         self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
