@@ -27,6 +27,16 @@ class Settings:
     cip_certificate_ttl_min: int = 240
     pressure_limit_bar: float = 1.8
     hop_window_slack_min: float = 5.0
+    # 热源（蒸汽锅炉）安全与调度阈值
+    steam_low_water_pct: float = 25.0
+    steam_low_low_water_pct: float = 15.0
+    steam_high_water_pct: float = 80.0
+    steam_high_high_water_pct: float = 90.0
+    steam_header_target_bar: float = 0.7
+    steam_header_low_bar: float = 0.5
+    steam_header_high_bar: float = 0.9
+    steam_header_trip_bar: float = 1.0
+    steam_reading_stale_sec: int = 120
     log_level: str = "INFO"
 
     def validate(self) -> "Settings":
@@ -40,6 +50,40 @@ class Settings:
         require_int(self.cip_certificate_ttl_min, field="cip_certificate_ttl_min", minimum=5, maximum=2880)
         require_number(self.pressure_limit_bar, field="pressure_limit_bar", minimum=0.1, maximum=10.0)
         require_number(self.hop_window_slack_min, field="hop_window_slack_min", minimum=0.0, maximum=60.0)
+        require_number(self.steam_low_water_pct, field="steam_low_water_pct", minimum=1.0, maximum=49.0)
+        require_number(self.steam_low_low_water_pct, field="steam_low_low_water_pct", minimum=0.5, maximum=49.0)
+        require_number(self.steam_high_water_pct, field="steam_high_water_pct", minimum=51.0, maximum=99.0)
+        require_number(self.steam_high_high_water_pct, field="steam_high_high_water_pct", minimum=51.0, maximum=99.5)
+        if self.steam_low_low_water_pct >= self.steam_low_water_pct:
+            raise ValidationError(
+                "低低水位阈值必须低于低水位阈值",
+                low_low=self.steam_low_low_water_pct,
+                low=self.steam_low_water_pct,
+            )
+        if self.steam_high_high_water_pct <= self.steam_high_water_pct:
+            raise ValidationError(
+                "高高水位阈值必须高于高水位阈值",
+                high_high=self.steam_high_high_water_pct,
+                high=self.steam_high_water_pct,
+            )
+        require_number(self.steam_header_target_bar, field="steam_header_target_bar", minimum=0.1, maximum=10.0)
+        require_number(self.steam_header_low_bar, field="steam_header_low_bar", minimum=0.05, maximum=10.0)
+        require_number(self.steam_header_high_bar, field="steam_header_high_bar", minimum=0.1, maximum=10.0)
+        require_number(self.steam_header_trip_bar, field="steam_header_trip_bar", minimum=0.1, maximum=10.0)
+        if not (
+            self.steam_header_low_bar
+            < self.steam_header_target_bar
+            < self.steam_header_high_bar
+            < self.steam_header_trip_bar
+        ):
+            raise ValidationError(
+                "联箱压力阈值必须满足 low < target < high < trip",
+                low=self.steam_header_low_bar,
+                target=self.steam_header_target_bar,
+                high=self.steam_header_high_bar,
+                trip=self.steam_header_trip_bar,
+            )
+        require_int(self.steam_reading_stale_sec, field="steam_reading_stale_sec", minimum=5, maximum=3600)
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise ValidationError("log_level 取值不合法", field="log_level", value=self.log_level)
         return self
@@ -76,6 +120,15 @@ class Settings:
             "cip_certificate_ttl_min": self.cip_certificate_ttl_min,
             "pressure_limit_bar": self.pressure_limit_bar,
             "hop_window_slack_min": self.hop_window_slack_min,
+            "steam_low_water_pct": self.steam_low_water_pct,
+            "steam_low_low_water_pct": self.steam_low_low_water_pct,
+            "steam_high_water_pct": self.steam_high_water_pct,
+            "steam_high_high_water_pct": self.steam_high_high_water_pct,
+            "steam_header_target_bar": self.steam_header_target_bar,
+            "steam_header_low_bar": self.steam_header_low_bar,
+            "steam_header_high_bar": self.steam_header_high_bar,
+            "steam_header_trip_bar": self.steam_header_trip_bar,
+            "steam_reading_stale_sec": self.steam_reading_stale_sec,
             "log_level": self.log_level.upper(),
         }
 
@@ -85,12 +138,20 @@ class Settings:
 
         base = cls()
         text_keys = ("host", "log_level")
-        int_keys = ("port", "max_active_batches", "cip_certificate_ttl_min")
+        int_keys = ("port", "max_active_batches", "cip_certificate_ttl_min", "steam_reading_stale_sec")
         float_keys = (
             "temp_tolerance_c",
             "pitch_temp_max_c",
             "pressure_limit_bar",
             "hop_window_slack_min",
+            "steam_low_water_pct",
+            "steam_low_low_water_pct",
+            "steam_high_water_pct",
+            "steam_high_high_water_pct",
+            "steam_header_target_bar",
+            "steam_header_low_bar",
+            "steam_header_high_bar",
+            "steam_header_trip_bar",
         )
         values: dict[str, Any] = {}
         for key in text_keys:

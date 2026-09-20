@@ -113,6 +113,44 @@ class ReadingQuality(str, Enum):
     REJECTED = "rejected"
 
 
+class BoilerState(str, Enum):
+    """锅炉运行状态机。"""
+
+    STANDBY = "standby"      # 停炉待命，可被调度
+    PURGING = "purging"      # 点火前吹扫
+    FIRING = "firing"        # 燃烧供汽
+    BANKED = "banked"        # 压火/解列，保留余压但不供汽
+    LOCKED = "locked"        # 跳闸挂牌，未复位前禁止点火
+
+
+class InterlockKind(str, Enum):
+    """越线处置类型。"""
+
+    LOW_WATER = "low_water"
+    LOW_LOW_WATER = "low_low_water"
+    HIGH_WATER = "high_water"
+    HIGH_HIGH_WATER = "high_high_water"
+    STEAM_HIGH = "steam_high"
+
+
+class InterlockState(str, Enum):
+    """处置单生命周期。"""
+
+    ACTIVE = "active"        # 处置中，仍有自动/人工步骤未完成或条件未恢复
+    RECOVERED = "recovered"  # 非跳闸类，工艺量回到安全区后自动闭环
+    SUPERSEDED = "superseded"  # 被更高优先级的跳闸处置单取代
+    LOCKED = "locked"        # 跳闸类，自动步完成后锅炉挂牌
+    RESET = "reset"          # 跳闸锅炉已人工复位
+
+
+class StepStatus(str, Enum):
+    """处置单步骤状态。"""
+
+    PENDING = "pending"
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
 class DocMixin:
     """把数据类转换为可持久化文档。"""
 
@@ -372,6 +410,89 @@ class AuditEntry(DocMixin):
     action: str
     detail: dict[str, Any] = field(default_factory=dict)
     recorded_at: str = ""
+
+
+@dataclass
+class Boiler(DocMixin):
+    """蒸汽锅炉台账与当前运行状态。"""
+
+    id: str
+    code: str
+    brewery_id: str
+    rating_kgh: float
+    priority: int = 100
+    state: str = BoilerState.STANDBY.value
+    water_pct: float | None = None
+    steam_bar: float | None = None
+    burner_on: bool = False
+    feedwater_open: bool = False
+    blowdown_open: bool = False
+    steam_isolated: bool = False
+    tagged: bool = False
+    last_reading_at: str | None = None
+    online_since: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class SteamConsumer(DocMixin):
+    """用汽设备（糖化锅、煮沸锅、CIP 等）的需求登记。"""
+
+    id: str
+    code: str
+    brewery_id: str
+    name: str
+    demand_kgh: float
+    active: bool = False
+    batch_id: str | None = None
+    claimed_at: str | None = None
+    claimed_by: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class SteamHeader(DocMixin):
+    """厂区蒸汽联箱（分汽缸）的最新测点。"""
+
+    brewery_id: str
+    pressure_bar: float | None = None
+    updated_at: str | None = None
+
+
+@dataclass
+class InterlockStep(DocMixin):
+    """安全处置单中的一个固定步骤。"""
+
+    order: int
+    key: str
+    label: str
+    automatic: bool
+    status: str = StepStatus.PENDING.value
+    done_at: str | None = None
+    actor: str | None = None
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class InterlockCase(DocMixin):
+    """一次越线后的安全处置单，全过程留档。"""
+
+    id: str
+    boiler_id: str
+    brewery_id: str
+    kind: str
+    tripping: bool
+    trigger_value: float
+    threshold: float
+    state: str = InterlockState.ACTIVE.value
+    reason: str = ""
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    raised_at: str = ""
+    recovered_at: str | None = None
+    locked_at: str | None = None
+    reset_at: str | None = None
+    reset_by: str | None = None
+    updated_at: str = ""
 
 
 @dataclass

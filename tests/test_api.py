@@ -44,7 +44,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("banner", overview)
         status, pages = self.call("GET", "/api/pages")
-        self.assertEqual(4, len(pages["pages"]))
+        self.assertEqual(5, len(pages["pages"]))
         self.assertGreaterEqual(len(pages["routes"]), 50)
 
     def test_sequence_error_maps_to_conflict(self) -> None:
@@ -67,3 +67,50 @@ class ApiTest(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/static/app.js", timeout=10) as response:
             script = response.read().decode("utf-8")
         self.assertIn("initMashPage", script)
+
+    def test_steam_page_is_served(self) -> None:
+        with urllib.request.urlopen(self.base + "/steam", timeout=10) as response:
+            html = response.read().decode("utf-8")
+        self.assertIn("热源供给", html)
+
+    def test_steam_dispatch_and_interlock_over_http(self) -> None:
+        status, overview = self.call("GET", "/api/steam/overview")
+        self.assertEqual(200, status)
+        self.assertEqual(2, overview["boilers"])
+        status, consumers = self.call("GET", "/api/steam/consumers")
+        boil = next(c for c in consumers["consumers"] if c["code"] == "boil")
+        status, _ = self.call("POST", f"/api/steam/consumers/{boil['id']}/claim", {"actor": "api"})
+        self.assertEqual(200, status)
+        status, _ = self.call("POST", "/api/steam/header/report", {"pressure_bar": 0.45, "actor": "api"})
+        self.assertEqual(200, status)
+        status, report = self.call("POST", "/api/steam/dispatch", {"actor": "api"})
+        self.assertEqual(200, status)
+        self.assertEqual(600.0, report["online_capacity_kgh"])
+
+        status, boilers = self.call("GET", "/api/steam/boilers")
+        target = boilers["boilers"][0]
+        status, result = self.call(
+            "POST",
+            f"/api/steam/boilers/{target['id']}/readings",
+            {"water_pct": 8.0, "operator": "api"},
+        )
+        self.assertEqual(200, status)
+        case = result["interlock"]
+        self.assertEqual("locked", case["state"])
+        status, cases = self.call("GET", "/api/steam/cases")
+        self.assertEqual(200, status)
+        self.assertGreaterEqual(cases["count"], 1)
+
+    def test_steam_interlock_reset_blocked_over_http(self) -> None:
+        status, boilers = self.call("GET", "/api/steam/boilers")
+        target = boilers["boilers"][0]
+        _, result = self.call(
+            "POST",
+            f"/api/steam/boilers/{target['id']}/readings",
+            {"water_pct": 8.0, "operator": "api"},
+        )
+        case_id = result["interlock"]["id"]
+        # 人工步未确认、水位未恢复，复位应被联锁拒绝（409）。
+        status, payload = self.call("POST", f"/api/steam/cases/{case_id}/reset", {"operator": "api"})
+        self.assertEqual(409, status)
+        self.assertEqual("interlock_blocked", payload["error"])

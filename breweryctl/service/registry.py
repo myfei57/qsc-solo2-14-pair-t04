@@ -16,12 +16,14 @@ from ..domain.hop import HopSchedule
 from ..domain.mash import MashController
 from ..domain.ns import NamespaceRegistry
 from ..domain.recipe import RecipeRegistry
+from ..domain.steam import SteamPlant
 from ..domain.temp import TemperatureController
 from ..domain.wort import WortSystem
 from ..persistence.store import FileStore
 from .brewing import BrewingService
 from .control import ControlService
 from .maintenance import MaintenanceService
+from .steam import SteamService
 from .telemetry import TelemetryService
 
 
@@ -42,6 +44,7 @@ class ComponentRegistry:
         self.hops = HopSchedule(self.store, self.settings, self.clock)
         self.temp = TemperatureController(self.store, self.settings, self.clock)
         self.co2 = CO2Controller(self.store, self.settings, self.clock, self.alarms)
+        self.steam = SteamPlant(self.store, self.settings, self.clock, self.alarms)
         self.cip = CIPService(self.store, self.settings, self.clock, self.alarms)
         self.tanks = FermentTankService(
             self.store, self.settings, self.clock, self.cip, self.co2, self.alarms
@@ -63,6 +66,7 @@ class ComponentRegistry:
             self.audit,
         )
         self.control = ControlService(self.temp, self.co2, self.alarms, self.audit)
+        self.steam_service = SteamService(self.steam, self.audit)
         self.telemetry = TelemetryService(self.temp, self.alarms, self.audit)
         self.maintenance = MaintenanceService(self.cip, self.tanks, self.audit)
 
@@ -106,6 +110,7 @@ class ComponentRegistry:
         if not self.recipes.list():
             recipe = self._seed_recipe(str(brewery["id"]))
             created["recipe"] = recipe["id"]
+        created["steam"] = self._seed_steam(str(brewery["id"]))
         created["recovered"] = self.brewing.recover()
         self.store.set_meta("booted_at", format_moment(self.clock.now()))
         return created
@@ -130,6 +135,7 @@ class ComponentRegistry:
             "ferment": self.tanks.summary(),
             "maintenance": self.maintenance.summary(),
             "control": self.control.summary(),
+            "steam": self.steam.overview(self._default_brewery_id()),
             "alarms": self.alarms.summary(),
             "audit_entries": self.audit.count(),
             "tanks": self.tanks.list_tanks(),
@@ -139,6 +145,25 @@ class ComponentRegistry:
         """关闭存储并落盘。"""
 
         self.store.close()
+
+    def _default_brewery_id(self) -> str:
+        """返回当前默认（首个）工厂标识。"""
+
+        return str(self.namespaces.list_breweries()[0]["id"])
+
+    def _seed_steam(self, brewery_id: str) -> dict[str, Any]:
+        """在没有锅炉台账时建立两炉 + 糖化/煮沸/CIP 三个用汽点。"""
+
+        if self.steam.list_boilers(brewery_id):
+            return {"boilers": 0, "consumers": 0}
+        # 1 号炉优先并入；两炉同时运行可覆盖糖化+煮沸叠加峰值。
+        self.steam.register_boiler(brewery_id, "BL-01", 600.0, priority=10, water_pct=55.0)
+        self.steam.register_boiler(brewery_id, "BL-02", 600.0, priority=20, water_pct=55.0)
+        self.steam.register_consumer(brewery_id, "mash", "糖化锅", 300.0, kind="mash")
+        self.steam.register_consumer(brewery_id, "boil", "煮沸锅", 500.0, kind="boil")
+        self.steam.register_consumer(brewery_id, "cip", "CIP 清洗", 150.0, kind="cip")
+        self.steam.report_header(brewery_id, self.settings.steam_header_target_bar)
+        return {"boilers": 2, "consumers": 3}
 
     def _seed_recipe(self, brewery_id: str) -> dict[str, Any]:
         recipe = self.recipes.define(

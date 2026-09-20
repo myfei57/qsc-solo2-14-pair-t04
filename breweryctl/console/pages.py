@@ -49,6 +49,18 @@ PAGE_CATALOG: tuple[dict[str, Any], ...] = (
         "description": "告警确认、解除与批次审计查询",
         "api": ["/api/alarms", "/api/alarms/{alarm_id}/ack", "/api/audit"],
     },
+    {
+        "slug": "steam",
+        "title": "热源供给",
+        "file": "steam.html",
+        "description": "按用汽需求调度锅炉，水位/汽压越线按安全顺序处置并留档",
+        "api": [
+            "/api/steam/overview",
+            "/api/steam/dispatch",
+            "/api/steam/boilers/{boiler_id}/readings",
+            "/api/steam/cases/{case_id}/reset",
+        ],
+    },
 )
 
 

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BreweryCtl · 热源供给</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BreweryCtl 热源供给</h1>
+      <nav>
+        <a href="/mash">糖化</a>
+        <a href="/ferment">发酵</a>
+        <a href="/cip">清洗 CIP</a>
+        <a href="/alarms">告警与审计</a>
+        <a class="active" href="/steam">热源供给</a>
+      </nav>
+    </header>
+    <div class="banner">
+      在制批次 <strong id="banner-batches">-</strong>
+      占用罐体 <strong id="banner-tanks">-</strong>
+      活跃告警 <strong id="banner-alarms">-</strong>
+      闩锁 <strong id="banner-latches">-</strong>
+    </div>
+    <main>
+      <section>
+        <h2>热源总览</h2>
+        <label for="operator">操作员</label>
+        <input id="operator" value="console" />
+        <button onclick="run(loadOverview, 'overview-log')">刷新总览</button>
+        <button class="secondary" onclick="run(() => apiPost('/api/steam/dispatch', { actor: value('operator') || 'console' }), 'overview-log', afterDispatch)">按需求调度</button>
+        <pre id="overview-view">尚未加载</pre>
+        <div id="overview-log"></div>
+      </section>
+
+      <section>
+        <h2>用汽需求（糖化 / 煮沸 / CIP）</h2>
+        <table>
+          <thead>
+            <tr><th>编号</th><th>设备</th><th>额定 kg/h</th><th>在用</th><th>批次</th><th>操作</th></tr>
+          </thead>
+          <tbody id="consumer-rows"></tbody>
+        </table>
+        <label for="demand-batch">关联批次（可选）</label>
+        <input id="demand-batch" placeholder="batch_id" />
+        <div id="consumer-log"></div>
+      </section>
+
+      <section>
+        <h2>锅炉台账与测点</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th><th>额定 kg/h</th><th>优先级</th><th>状态</th>
+              <th>水位 %</th><th>汽压 bar</th><th>燃烧器</th><th>给水</th><th>排污</th><th>主汽阀</th><th>挂牌</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="boiler-rows"></tbody>
+        </table>
+        <h3>上报测点</h3>
+        <label for="reading-boiler">锅炉</label>
+        <select id="reading-boiler"></select>
+        <label for="reading-water">水位 %</label>
+        <input id="reading-water" type="number" style="width:6em" />
+        <label for="reading-steam">汽压 bar</label>
+        <input id="reading-steam" type="number" style="width:6em" />
+        <button onclick="run(submitBoilerReading, 'boiler-log', afterReading)">上报</button>
+        <div id="boiler-log"></div>
+      </section>
+
+      <section>
+        <h2>越线安全处置单</h2>
+        <button class="secondary" onclick="run(loadCases, 'case-log')">刷新处置单</button>
+        <table>
+          <thead>
+            <tr><th>处置单</th><th>锅炉</th><th>类型</th><th>跳闸</th><th>触发/阈值</th><th>状态</th><th>时间</th><th>操作</th></tr>
+          </thead>
+          <tbody id="case-rows"></tbody>
+        </table>
+        <pre id="case-view">点击「查看」显示完整处置步骤</pre>
+        <div id="case-log"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+    <script>
+      initSteamPage();
+    </script>
+  </body>
+</html>

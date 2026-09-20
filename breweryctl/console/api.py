@@ -69,6 +69,23 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/api/alarms/{alarm_id}/ack"),
     ("POST", "/api/alarms/{alarm_id}/resolve"),
     ("GET", "/api/audit"),
+    ("GET", "/api/steam/overview"),
+    ("GET", "/api/steam/boilers"),
+    ("POST", "/api/steam/boilers"),
+    ("GET", "/api/steam/boilers/{boiler_id}"),
+    ("POST", "/api/steam/boilers/{boiler_id}/readings"),
+    ("POST", "/api/steam/boilers/{boiler_id}/start"),
+    ("POST", "/api/steam/boilers/{boiler_id}/stop"),
+    ("GET", "/api/steam/consumers"),
+    ("POST", "/api/steam/consumers"),
+    ("POST", "/api/steam/consumers/{consumer_id}/claim"),
+    ("POST", "/api/steam/consumers/{consumer_id}/release"),
+    ("POST", "/api/steam/header/report"),
+    ("POST", "/api/steam/dispatch"),
+    ("GET", "/api/steam/cases"),
+    ("GET", "/api/steam/cases/{case_id}"),
+    ("POST", "/api/steam/cases/{case_id}/steps/{step_key}"),
+    ("POST", "/api/steam/cases/{case_id}/reset"),
 )
 
 
@@ -529,6 +546,145 @@ class ApiRouter:
         limit = _optional_int(_first(query, "limit"), field="limit", default=100, minimum=1, maximum=1000)
         entries = self.registry.audit.history(batch_id=batch_id, limit=limit)
         return {"entries": entries, "count": len(entries)}
+
+    def _steam_brewery(self, body: dict[str, Any], query: dict[str, list[str]]) -> str:
+        brewery_id = body.get("brewery_id") or _first(query, "brewery_id")
+        if not brewery_id:
+            brewery_id = self.registry._default_brewery_id()
+        return str(brewery_id)
+
+    def _handle_GET_api_steam_overview(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        brewery_id = self._steam_brewery(body, query)
+        return self.registry.steam_service.overview(brewery_id)
+
+    def _handle_GET_api_steam_boilers(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        brewery_id = _first(query, "brewery_id")
+        items = self.registry.steam_service.list_boilers(brewery_id)
+        return {"boilers": items}
+
+    def _handle_POST_api_steam_boilers(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        boiler = self.registry.steam_service.register_boiler(
+            self._steam_brewery(body, query),
+            body.get("code"),
+            body.get("rating_kgh"),
+            body.get("operator", "console"),
+            priority=int(body.get("priority", 100)),
+            water_pct=body.get("water_pct"),
+        )
+        return {"boiler": boiler}
+
+    def _handle_GET_api_steam_boilers_boiler_id(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.boiler_snapshot(params["boiler_id"])
+
+    def _handle_POST_api_steam_boilers_boiler_id_readings(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.report_boiler(
+            params["boiler_id"],
+            body.get("operator", "console"),
+            water_pct=body.get("water_pct"),
+            steam_bar=body.get("steam_bar"),
+        )
+
+    def _handle_POST_api_steam_boilers_boiler_id_start(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"boiler": self.registry.steam_service.start_boiler(params["boiler_id"], body.get("operator", "console"))}
+
+    def _handle_POST_api_steam_boilers_boiler_id_stop(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"boiler": self.registry.steam_service.stop_boiler(params["boiler_id"], body.get("operator", "console"))}
+
+    def _handle_GET_api_steam_consumers(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        brewery_id = _first(query, "brewery_id")
+        items = self.registry.steam_service.list_consumers(brewery_id)
+        return {"consumers": items}
+
+    def _handle_POST_api_steam_consumers(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        consumer = self.registry.steam_service.register_consumer(
+            self._steam_brewery(body, query),
+            body.get("code"),
+            body.get("name"),
+            body.get("demand_kgh"),
+            body.get("operator", "console"),
+            kind=str(body.get("kind", "other")),
+        )
+        return {"consumer": consumer}
+
+    def _handle_POST_api_steam_consumers_consumer_id_claim(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        consumer = self.registry.steam_service.claim(
+            params["consumer_id"],
+            body.get("actor", "console"),
+            batch_id=body.get("batch_id"),
+        )
+        return {"consumer": consumer}
+
+    def _handle_POST_api_steam_consumers_consumer_id_release(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        consumer = self.registry.steam_service.release(
+            params["consumer_id"], body.get("actor", "console")
+        )
+        return {"consumer": consumer}
+
+    def _handle_POST_api_steam_header_report(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        header = self.registry.steam_service.report_header(
+            self._steam_brewery(body, query),
+            body.get("pressure_bar"),
+            body.get("actor", "console"),
+        )
+        return {"header": header}
+
+    def _handle_POST_api_steam_dispatch(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.steam_service.dispatch(
+            self._steam_brewery(body, query), body.get("actor", "console")
+        )
+
+    def _handle_GET_api_steam_cases(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        items = self.registry.steam_service.list_cases(
+            boiler_id=_first(query, "boiler_id"), state=_first(query, "state")
+        )
+        return {"cases": items, "count": len(items)}
+
+    def _handle_GET_api_steam_cases_case_id(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"case": self.registry.steam_service.get_case(params["case_id"])}
+
+    def _handle_POST_api_steam_cases_case_id_steps_step_key(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        case = self.registry.steam_service.complete_step(
+            params["case_id"], params["step_key"], body.get("operator", "console")
+        )
+        return {"case": case}
+
+    def _handle_POST_api_steam_cases_case_id_reset(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        case = self.registry.steam_service.reset_case(params["case_id"], body.get("operator", "console"))
+        return {"case": case}
 
 
 def _handler_name(method: str, pattern: str) -> str:
